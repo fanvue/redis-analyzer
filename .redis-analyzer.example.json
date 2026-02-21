@@ -1,0 +1,9 @@
+{
+  "connections": {
+    "prod": "rediss://general-cache-user@master.fvclg0smcx5wzcm.b2f2ap.euw1.cache.amazonaws.com:6379",
+    "local": "redis://localhost:6379"
+  },
+  "defaults": {
+    "scanCount": 1000
+  }
+}
