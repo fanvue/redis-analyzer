@@ -7,13 +7,20 @@ import {
   formatBytes,
   formatNumber,
   formatPercent,
+  green,
   printFinding,
   printSectionHeader,
   printTable,
+  red,
   renderBar,
+  yellow,
 } from "../utils/format.js";
 import {
-  DEFAULT_SCAN_COUNT,
+  AUTO_SCALE_MAX,
+  AUTO_SCALE_MIN,
+  AUTO_SCALE_PERCENT,
+  CONFIDENCE_HIGH_PERCENT,
+  CONFIDENCE_MEDIUM_PERCENT,
   NO_TTL_WARNING_PERCENT,
   PIPELINE_BATCH_SIZE,
   SCAN_BATCH_SIZE,
@@ -21,19 +28,52 @@ import {
 } from "../utils/thresholds.js";
 
 /**
+ * Compute a confidence label based on the sample ratio.
+ *
+ * @param {number} sampledCount
+ * @param {number} totalKeys
+ * @returns {"high" | "medium" | "low"}
+ */
+function computeConfidence(sampledCount, totalKeys) {
+  if (totalKeys === 0) {
+    return "high";
+  }
+  const percent = (sampledCount / totalKeys) * 100;
+  if (percent >= CONFIDENCE_HIGH_PERCENT) {
+    return "high";
+  }
+  if (percent >= CONFIDENCE_MEDIUM_PERCENT) {
+    return "medium";
+  }
+  return "low";
+}
+
+/**
+ * Compute the target sample size based on total key count.
+ * Returns ~10% of total, clamped between 1,000 and 10,000.
+ *
+ * @param {number} totalKeys
+ * @returns {number}
+ */
+function computeAutoSampleSize(totalKeys) {
+  const scaled = Math.ceil(totalKeys * (AUTO_SCALE_PERCENT / 100));
+  return Math.max(AUTO_SCALE_MIN, Math.min(AUTO_SCALE_MAX, scaled));
+}
+
+/**
  * Run key pattern analysis against a Redis instance.
- * Uses SCAN for production-safe, non-blocking key sampling.
+ * Uses RANDOMKEY for random sampling with SCAN as a fallback.
  *
  * @param {import("ioredis").Redis} redis
  * @param {object} options
  * @param {number} [options.scanCount] - Number of keys to sample
+ * @param {boolean} [options.scanCountExplicit] - Whether scanCount was explicitly provided
  * @returns {Promise<{status: string, title: string, metrics: object, findings: string[]}>}
  */
 export async function runKeyPatternCheck(redis, options = {}) {
   const title = "KEY PATTERN ANALYSIS";
   const findings = [];
   let status = "ok";
-  const maxSampleKeys = options.scanCount || DEFAULT_SCAN_COUNT;
 
   try {
     // Get keyspace overview from INFO
@@ -65,7 +105,12 @@ export async function runKeyPatternCheck(redis, options = {}) {
       };
     }
 
-    // Sample keys using SCAN
+    // Determine sample target: explicit flag wins, otherwise auto-scale
+    const maxSampleKeys = options.scanCountExplicit
+      ? options.scanCount
+      : computeAutoSampleSize(totalKeys);
+
+    // Sample keys using SCAN (non-blocking, production-safe)
     const sampledKeys = [];
     let cursor = "0";
 
@@ -75,7 +120,6 @@ export async function runKeyPatternCheck(redis, options = {}) {
       sampledKeys.push(...keys);
     } while (cursor !== "0" && sampledKeys.length < maxSampleKeys);
 
-    // Trim to max sample size
     if (sampledKeys.length > maxSampleKeys) {
       sampledKeys.length = maxSampleKeys;
     }
@@ -176,11 +220,14 @@ export async function runKeyPatternCheck(redis, options = {}) {
       .sort((a, b) => b[1].totalBytes - a[1].totalBytes)
       .slice(0, 15);
 
+    const confidence = computeConfidence(sampledKeys.length, totalKeys);
+
     const metrics = {
       totalKeys,
       totalExpiring,
       databases,
       sampledCount: sampledKeys.length,
+      confidence,
       typeDistribution,
       encodingDistribution,
       timeToLiveDistribution,
@@ -210,8 +257,13 @@ export function printKeyPatternCheck(result) {
     return;
   }
 
+  const confidenceColors = { high: green, medium: yellow, low: red };
+  const confidenceColor = confidenceColors[metrics.confidence] || dim;
+  const confidenceLabel = metrics.confidence
+    ? `  ${confidenceColor(`[${metrics.confidence} confidence]`)}`
+    : "";
   const sampleNote = metrics.sampledCount
-    ? dim(` (sampled ${formatNumber(metrics.sampledCount)} of ${formatNumber(metrics.totalKeys)})`)
+    ? dim(` (sampled ${formatNumber(metrics.sampledCount)} of ${formatNumber(metrics.totalKeys)})`) + confidenceLabel
     : "";
   console.info(
     `    ${dim("Total Keys:".padEnd(22))} ${bold(formatNumber(metrics.totalKeys))}${sampleNote}`

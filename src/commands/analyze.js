@@ -1,23 +1,24 @@
 #!/usr/bin/env node
 
-import { printConnectionCheck, runConnectionCheck } from "../checks/connectionCheck.js";
-import { printKeyPatternCheck, runKeyPatternCheck } from "../checks/keyPatternCheck.js";
-import { printMemoryCheck, runMemoryCheck } from "../checks/memoryCheck.js";
-import { printPerformanceCheck, runPerformanceCheck } from "../checks/performanceCheck.js";
-import { printReplicationCheck, runReplicationCheck } from "../checks/replicationCheck.js";
+import { printConnectionCheck } from "../checks/connectionCheck.js";
+import { printKeyPatternCheck } from "../checks/keyPatternCheck.js";
+import { printMemoryCheck } from "../checks/memoryCheck.js";
+import { printPerformanceCheck } from "../checks/performanceCheck.js";
+import { printReplicationCheck } from "../checks/replicationCheck.js";
+import { buildJsonOutput, createDemoLoader, runAnalysis } from "../utils/analysis.js";
 import { loadPreviousReport, printComparison } from "../utils/comparison.js";
 import { getConfigDefaults, loadConfig, resolveConnection } from "../utils/config.js";
-import { createConnection, parseInfoSection } from "../utils/connection.js";
+import { createConnection } from "../utils/connection.js";
 import {
   createSpinner,
   dim,
   formatDuration,
   printReportHeader,
   printTopSummary,
-  statusIcon,
 } from "../utils/format.js";
-import { askPassword, promptCredentials, waitForKeypress } from "../utils/prompt.js";
+import { askPassword, promptCredentials } from "../utils/prompt.js";
 import { generateRecommendations, printRecommendations } from "../utils/recommendations.js";
+import { startDashboard } from "../tui/dashboard.js";
 
 // ── Config loading ────────────────────────────────────────────
 const config = loadConfig();
@@ -54,9 +55,11 @@ const OPTIONS = {
   json: args.includes("--json"),
   noScan: args.includes("--no-scan") || configDefaults.noScan,
   insecure: args.includes("--insecure") || configDefaults.insecure,
-  scanCount: getNumberFlag("--scan-count", configDefaults.scanCount || 1000),
+  scanCount: getNumberFlag("--scan-count", configDefaults.scanCount || 500),
+  scanCountExplicit: args.includes("--scan-count"),
   watch: getNumberFlag("--watch", 0),
   compare: getStringAfterFlag("--compare", null),
+  demo: getStringAfterFlag("--demo", null),
 };
 
 // ── Help ──────────────────────────────────────────────────────
@@ -77,8 +80,9 @@ Options:
   --scan-count <n>       Number of keys to sample for big key detection (default: 1000)
   --no-scan              Skip key pattern analysis (fastest mode)
   --insecure             Skip TLS certificate verification (self-signed certificates)
-  --watch <seconds>      Re-run analysis every N seconds (live monitoring)
+  --watch <seconds>      TUI refresh interval in seconds (default: 10)
   --compare <file.json>  Compare results against a previous JSON export
+  --demo <file.json>     Run with fake data from a fixture file (no Redis connection)
   --help, -h             Show help
 
 Exit codes:
@@ -87,12 +91,12 @@ Exit codes:
   2                      Critical issues detected
 
 Examples:
-  pnpm -F @pandora/redis-analyzer start redis://localhost:6379
-  pnpm -F @pandora/redis-analyzer start rediss://user@host:6380
-  pnpm -F @pandora/redis-analyzer start redis://host:6379 --json --scan-count 5000
-  pnpm -F @pandora/redis-analyzer start redis://host:6379 --watch 10
-  pnpm -F @pandora/redis-analyzer start redis://host:6379 --compare previous.json
-  pnpm -F @pandora/redis-analyzer start prod
+  node src/cli.js redis://localhost:6379
+  node src/cli.js rediss://user@host:6380
+  node src/cli.js redis://host:6379 --json --scan-count 5000
+  node src/cli.js redis://host:6379 --watch 10
+  node src/cli.js redis://host:6379 --compare previous.json
+  node src/cli.js prod
 `);
 
   if (config?.connections) {
@@ -112,15 +116,15 @@ if (args.includes("--help") || args.includes("-h")) {
   process.exit(0);
 }
 
-if (!rawInput) {
+if (!rawInput && !OPTIONS.demo) {
   printHelp();
   process.exit(1);
 }
 
 // Resolve named connection or use URL directly
-const REDIS_URL = resolveConnection(rawInput, config);
+const REDIS_URL = OPTIONS.demo ? null : resolveConnection(rawInput, config);
 
-if (!REDIS_URL) {
+if (!REDIS_URL && !OPTIONS.demo) {
   console.error(`  Unknown connection: "${rawInput}"`);
   if (config?.connections) {
     const names = Object.keys(config.connections);
@@ -133,82 +137,6 @@ if (!REDIS_URL) {
 }
 
 // ── Analysis core ─────────────────────────────────────────────
-
-/**
- * Run all checks and return structured results.
- *
- * @param {import("ioredis").Redis} redis
- * @param {boolean} showSpinners
- * @returns {Promise<{results: object, serverInfo: object, warnings: number, criticals: number}>}
- */
-async function runAnalysis(redis, showSpinners) {
-  const serverRaw = await redis.info("server");
-  const serverInfo = parseInfoSection(serverRaw);
-  const redisVersion = serverInfo.redis_version || "unknown";
-  const uptimeSeconds = parseInt(serverInfo.uptime_in_seconds || "0", 10);
-
-  const results = {};
-
-  const analysisSpinner = showSpinners ? createSpinner("Running core analysis checks...") : null;
-
-  const [memoryResult, performanceResult, connectionResult, replicationResult] = await Promise.all([
-    runMemoryCheck(redis),
-    runPerformanceCheck(redis),
-    runConnectionCheck(redis),
-    runReplicationCheck(redis),
-  ]);
-
-  results.memory = memoryResult;
-  results.performance = performanceResult;
-  results.connections = connectionResult;
-  results.replication = replicationResult;
-  analysisSpinner?.succeed(
-    `Core checks complete  ${statusIcon(memoryResult.status)} memory  ${statusIcon(performanceResult.status)} performance  ${statusIcon(connectionResult.status)} connections  ${statusIcon(replicationResult.status)} replication`
-  );
-
-  if (!OPTIONS.noScan) {
-    const scanSpinner = showSpinners
-      ? createSpinner(`Scanning key patterns (sampling ${OPTIONS.scanCount} keys)...`)
-      : null;
-    results.keyPatterns = await runKeyPatternCheck(redis, { scanCount: OPTIONS.scanCount });
-    scanSpinner?.succeed(
-      `Key pattern analysis complete  ${statusIcon(results.keyPatterns.status)} keys`
-    );
-  }
-
-  let warnings = 0;
-  let criticals = 0;
-  for (const result of Object.values(results)) {
-    if (result.status === "warning") {
-      warnings++;
-    }
-    if (result.status === "critical") {
-      criticals++;
-    }
-  }
-
-  return { results, serverInfo: { redisVersion, uptimeSeconds }, warnings, criticals };
-}
-
-/**
- * Build a JSON output object from analysis results.
- */
-function buildJsonOutput(parsedUrl, displayHost, analysis) {
-  return {
-    timestamp: new Date().toISOString(),
-    server: {
-      url: `${parsedUrl.protocol}//${displayHost}`,
-      version: analysis.serverInfo.redisVersion,
-      uptimeSeconds: analysis.serverInfo.uptimeSeconds,
-    },
-    memory: analysis.results.memory || null,
-    performance: analysis.results.performance || null,
-    connections: analysis.results.connections || null,
-    keyPatterns: analysis.results.keyPatterns || null,
-    replication: analysis.results.replication || null,
-    summary: { warnings: analysis.warnings, critical: analysis.criticals },
-  };
-}
 
 /**
  * Print the full ASCII report.
@@ -252,6 +180,42 @@ function printReport(parsedUrl, displayHost, analysis, previousReport) {
 // ── Main ──────────────────────────────────────────────────────
 
 async function run() {
+  // ── Demo mode ────────────────────────────────────────────────
+  if (OPTIONS.demo) {
+    const demoLoader = createDemoLoader(OPTIONS.demo);
+    const parsedUrl = new URL("redis://demo:6379");
+    const displayHost = "demo:6379";
+
+    if (!OPTIONS.json && process.stdout.isTTY) {
+      await startDashboard({
+        redis: null,
+        parsedUrl,
+        displayHost,
+        options: OPTIONS,
+        previousReport: null,
+        demoLoader,
+      });
+    } else {
+      const analysis = demoLoader();
+      if (OPTIONS.json) {
+        const jsonOutput = buildJsonOutput(parsedUrl, displayHost, analysis);
+        console.info(JSON.stringify(jsonOutput, null, 2));
+      } else {
+        printReport(parsedUrl, displayHost, analysis, null);
+        printMemoryCheck(analysis.results.memory);
+        printPerformanceCheck(analysis.results.performance);
+        printConnectionCheck(analysis.results.connections);
+        if (analysis.results.keyPatterns) {
+          printKeyPatternCheck(analysis.results.keyPatterns);
+        }
+        printReplicationCheck(analysis.results.replication);
+      }
+      process.exit(0);
+    }
+    return;
+  }
+
+  // ── Normal mode ──────────────────────────────────────────────
   const parsedUrl = new URL(REDIS_URL);
   const displayHost = parsedUrl.host || `${parsedUrl.hostname}:6379`;
   const hasUsername = Boolean(parsedUrl.username);
@@ -273,7 +237,7 @@ async function run() {
   const tryConnect = async (connectionCredentials) => {
     const redis = createConnection(REDIS_URL, {
       insecure: OPTIONS.insecure,
-      keepAlive: OPTIONS.watch > 0,
+      keepAlive: OPTIONS.watch > 0 || (process.stdout.isTTY && !OPTIONS.json),
       ...connectionCredentials,
     });
 
@@ -320,107 +284,20 @@ async function run() {
   // Load comparison file if provided
   const previousReport = OPTIONS.compare ? loadPreviousReport(OPTIONS.compare) : null;
 
-  if (OPTIONS.watch > 0) {
-    // ── Watch mode ──────────────────────────────────────────
-    let iteration = 0;
-    let previousAnalysis = null;
-
-    const runWatchIteration = async () => {
-      iteration++;
-
-      if (iteration > 1) {
-        // Clear screen for fresh output
-        process.stdout.write("\x1b[2J\x1b[H");
-      }
-
-      console.info(
-        dim(`  [Watch mode: refreshing every ${OPTIONS.watch}s — press Ctrl+C to stop]`)
-      );
-
-      try {
-        // Check connection health and reconnect if needed
-        try {
-          await redis.ping();
-        } catch {
-          console.info(dim("  Reconnecting..."));
-          try {
-            redis.disconnect();
-          } catch {
-            /* ignore */
-          }
-          await redis.connect();
-        }
-
-        const analysis = await runAnalysis(redis, false);
-
-        if (OPTIONS.json) {
-          const jsonOutput = buildJsonOutput(parsedUrl, displayHost, analysis);
-          console.info(JSON.stringify(jsonOutput, null, 2));
-        } else {
-          // For watch mode, use previous iteration as comparison
-          const compareWith = previousAnalysis
-            ? buildJsonOutput(parsedUrl, displayHost, previousAnalysis)
-            : previousReport;
-          printReport(parsedUrl, displayHost, analysis, compareWith);
-
-          // Print detail sections inline (no keypress pause in watch mode)
-          printMemoryCheck(analysis.results.memory);
-          printPerformanceCheck(analysis.results.performance);
-          printConnectionCheck(analysis.results.connections);
-
-          if (analysis.results.keyPatterns) {
-            printKeyPatternCheck(analysis.results.keyPatterns);
-          }
-
-          printReplicationCheck(analysis.results.replication);
-        }
-
-        previousAnalysis = analysis;
-      } catch (error) {
-        console.error(`  Watch iteration failed: ${error.message}`);
-      }
-    };
-
-    await runWatchIteration();
-
-    const watchInterval = setInterval(runWatchIteration, OPTIONS.watch * 1000);
-
-    const stopWatch = async () => {
-      clearInterval(watchInterval);
-      console.info("\n  Watch mode stopped.");
-      await redis.quit();
-      process.exit(0);
-    };
-
-    // Clean exit on Ctrl+C
-    process.on("SIGINT", stopWatch);
-
-    // Exit on Escape key
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(true);
-      process.stdin.resume();
-      process.stdin.on("data", (key) => {
-        // Escape = 0x1b, Ctrl+C = 0x03
-        if (key[0] === 0x1b || key[0] === 0x03) {
-          stopWatch();
-        }
-      });
-    }
-
-    // Keep process alive
-    await new Promise(() => {});
+  if (!OPTIONS.json && process.stdout.isTTY) {
+    // ── TTY: interactive TUI dashboard (handles its own refresh) ─
+    await startDashboard({ redis, parsedUrl, displayHost, options: OPTIONS, previousReport });
   } else {
-    // ── Single run mode ───────────────────────────────────
+    // ── Non-interactive mode (JSON or piped output) ──────
     try {
-      const analysis = await runAnalysis(redis, showSpinners);
+      const analysis = await runAnalysis(redis, showSpinners, OPTIONS);
 
       if (OPTIONS.json) {
         const jsonOutput = buildJsonOutput(parsedUrl, displayHost, analysis);
         console.info(JSON.stringify(jsonOutput, null, 2));
       } else {
+        // Non-TTY: scrolling report for piped output and CI
         printReport(parsedUrl, displayHost, analysis, previousReport);
-
-        await waitForKeypress();
 
         printMemoryCheck(analysis.results.memory);
         printPerformanceCheck(analysis.results.performance);
@@ -433,7 +310,6 @@ async function run() {
         printReplicationCheck(analysis.results.replication);
       }
 
-      // Exit codes based on severity
       const exitCode = analysis.criticals > 0 ? 2 : analysis.warnings > 0 ? 1 : 0;
       await redis.quit();
       process.exit(exitCode);

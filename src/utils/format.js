@@ -27,7 +27,7 @@ const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
  * @param {string} text
  * @returns {string}
  */
-function stripAnsi(text) {
+export function stripAnsi(text) {
   return String(text).replace(ANSI_REGEX, "");
 }
 

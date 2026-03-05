@@ -1,0 +1,162 @@
+{
+  "results": {
+    "memory": {
+      "status": "warning",
+      "title": "MEMORY ANALYSIS",
+      "metrics": {
+        "usedMemory": 524288000,
+        "usedMemoryHuman": "500.00M",
+        "peakMemory": 734003200,
+        "peakMemoryHuman": "700.00M",
+        "maxMemory": 1073741824,
+        "maxMemoryPolicy": "allkeys-lru",
+        "fragmentationRatio": 1.32,
+        "evictedKeys": 0,
+        "usedMemoryOverhead": 52428800,
+        "usedMemoryDataset": 471859200,
+        "luaMemory": 40960,
+        "memoryUtilization": 48.83
+      },
+      "findings": []
+    },
+    "performance": {
+      "status": "ok",
+      "title": "PERFORMANCE ANALYSIS",
+      "metrics": {
+        "opsPerSecond": 1842,
+        "totalCommands": 1650000000,
+        "keyspaceHits": 243000000,
+        "keyspaceMisses": 307000000,
+        "hitRate": 44.2,
+        "rejectedConnections": 0,
+        "totalNetInput": 89200000000,
+        "totalNetOutput": 312400000000,
+        "uptimeSeconds": 561600,
+        "redisVersion": "7.2.4",
+        "slowLogEntries": [
+          [1, 1708704000, 15230, ["KEYS", "*"]],
+          [2, 1708703400, 8450, ["SMEMBERS", "online:instance:large-set"]],
+          [3, 1708702800, 5120, ["HGETALL", "config:feature-flags"]],
+          [4, 1708702200, 3840, ["SCAN", "0", "COUNT", "1000"]],
+          [5, 1708701600, 2560, ["SINTERSTORE", "temp:intersection", "set:a", "set:b"]]
+        ],
+        "slowLogLength": 128
+      },
+      "findings": []
+    },
+    "connections": {
+      "status": "ok",
+      "title": "CONNECTION ANALYSIS",
+      "metrics": {
+        "connectedClients": 47,
+        "blockedClients": 2,
+        "maxClients": 10000,
+        "maxClientsSource": "config",
+        "clientUtilization": 0.47,
+        "longIdleClients": 5,
+        "largeBufferClients": 0,
+        "databaseDistribution": {
+          "db0": 45,
+          "db1": 2
+        },
+        "clientListSkipped": false
+      },
+      "findings": []
+    },
+    "replication": {
+      "status": "ok",
+      "title": "REPLICATION ANALYSIS",
+      "metrics": {
+        "role": "master",
+        "connectedSlaves": 2,
+        "replicas": [
+          { "ip": "10.0.1.12", "port": "6379", "state": "online", "offset": "48291035", "lag": "0" },
+          { "ip": "10.0.1.13", "port": "6379", "state": "online", "offset": "48291035", "lag": "1" }
+        ],
+        "rdbLastSaveTime": 1708704000,
+        "rdbChangesSinceLastSave": 1240,
+        "rdbLastSaveStatus": "ok",
+        "timeSinceLastSave": 300,
+        "aofEnabled": false,
+        "aofLastWriteStatus": "ok",
+        "loading": false
+      },
+      "findings": []
+    },
+    "keyPatterns": {
+      "status": "warning",
+      "title": "KEY PATTERN ANALYSIS",
+      "metrics": {
+        "totalKeys": 5942,
+        "totalExpiring": 312,
+        "databases": {
+          "db0": { "keys": 5940, "expires": 310 },
+          "db1": { "keys": 2, "expires": 2 }
+        },
+        "sampledCount": 1000,
+        "samplingMethod": "scan",
+        "confidence": "medium",
+        "typeDistribution": {
+          "string": { "count": 946, "totalBytes": 196836 },
+          "set": { "count": 52, "totalBytes": 86220 },
+          "none": { "count": 2, "totalBytes": 0 }
+        },
+        "encodingDistribution": {
+          "embstr": 620,
+          "raw": 326,
+          "hashtable": 52,
+          "unknown": 2
+        },
+        "timeToLiveDistribution": {
+          "none": 688,
+          "under1Hour": 45,
+          "from1HourTo24Hours": 102,
+          "from1DayTo7Days": 98,
+          "over7Days": 67
+        },
+        "topKeys": [
+          { "key": "online:instance:a60e95e1-67a4-4974-86cc-6dded71067b8", "type": "set", "bytes": 19363 },
+          { "key": "online:instance:836ab571-e5fc-4a52-9848-6bfcf5a1645f", "type": "set", "bytes": 16867 },
+          { "key": "online:instance:faa51921-1200-416c-8d5d-38a0620cb4b9", "type": "set", "bytes": 2140 },
+          { "key": "online:instance:1e15bc64-3bb0-44af-906c-82e6d5770779", "type": "set", "bytes": 2140 },
+          { "key": "online:instance:3d2d93fa-1b6e-4572-9695-c714fca3006e", "type": "set", "bytes": 2140 },
+          { "key": "config:feature-flags", "type": "string", "bytes": 1884 },
+          { "key": "config:rate-limits", "type": "string", "bytes": 1884 },
+          { "key": "session:abc123", "type": "string", "bytes": 1592 },
+          { "key": "session:def456", "type": "string", "bytes": 1592 },
+          { "key": "cache:user:1001", "type": "string", "bytes": 1116 },
+          { "key": "cache:user:1002", "type": "string", "bytes": 1116 },
+          { "key": "cache:user:1003", "type": "string", "bytes": 1116 },
+          { "key": "queue:emails:pending", "type": "string", "bytes": 1090 },
+          { "key": "queue:emails:failed", "type": "string", "bytes": 1090 },
+          { "key": "stats:daily:2024-02-23", "type": "string", "bytes": 1090 },
+          { "key": "stats:daily:2024-02-22", "type": "string", "bytes": 1090 },
+          { "key": "lock:deploy", "type": "string", "bytes": 512 },
+          { "key": "lock:migration", "type": "string", "bytes": 512 },
+          { "key": "counter:requests", "type": "string", "bytes": 104 },
+          { "key": "counter:errors", "type": "string", "bytes": 104 }
+        ],
+        "noTimeToLivePercent": 68.8,
+        "sortedPrefixes": [
+          ["online:*", { "count": 52, "totalBytes": 86220 }],
+          ["config:*", { "count": 24, "totalBytes": 12480 }],
+          ["session:*", { "count": 186, "totalBytes": 11160 }],
+          ["cache:*", { "count": 420, "totalBytes": 9800 }],
+          ["queue:*", { "count": 38, "totalBytes": 4120 }],
+          ["stats:*", { "count": 96, "totalBytes": 3840 }],
+          ["lock:*", { "count": 12, "totalBytes": 1024 }],
+          ["counter:*", { "count": 8, "totalBytes": 832 }]
+        ]
+      },
+      "findings": [
+        "68.8% of sampled keys have no TTL - potential memory growth risk"
+      ]
+    }
+  },
+  "serverInfo": {
+    "redisVersion": "7.2.4",
+    "uptimeSeconds": 561600
+  },
+  "warnings": 1,
+  "criticals": 0
+}

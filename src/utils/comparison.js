@@ -36,7 +36,7 @@ export function loadPreviousReport(filePath) {
  * @param {(n: number) => string} [options.formatter]
  * @returns {string}
  */
-function formatDelta(current, previous, options = {}) {
+export function formatDelta(current, previous, options = {}) {
   const { higherIsBetter = false, formatter = String } = options;
   const delta = current - previous;
 

@@ -15,7 +15,16 @@ export const CLIENT_LIST_MAX_PARSE = 5000;
 
 // Key pattern thresholds
 export const NO_TTL_WARNING_PERCENT = 50;
-export const DEFAULT_SCAN_COUNT = 1000;
+export const DEFAULT_SCAN_COUNT = 500;
 export const SCAN_BATCH_SIZE = 100;
-export const PIPELINE_BATCH_SIZE = 50;
+export const PIPELINE_BATCH_SIZE = 100;
 export const TOP_KEYS_COUNT = 20;
+
+// Auto-scaling sample size
+export const AUTO_SCALE_PERCENT = 5;
+export const AUTO_SCALE_MIN = 200;
+export const AUTO_SCALE_MAX = 2000;
+
+// Confidence thresholds (as percentages of total keys)
+export const CONFIDENCE_HIGH_PERCENT = 10;
+export const CONFIDENCE_MEDIUM_PERCENT = 1;
